@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Usage: agent init [--force|-f] [--gitignore|-g] [--help]
+
+Commands:
+  init           Copy copilot-instructions.md into .github/ (abort if exists unless --force)
+
+Options:
+  -f, --force    Overwrite existing file
+  -g, --gitignore Add an entry for the copied file to the project's .gitignore (if it exists)
+  -h, --help     Show this help
+
+Examples:
+  agent init
+  agent init --force
+  agent init --gitignore
+  ./agents/agent init
+EOF
+} 
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+cmd="$1"; shift
+if [ "$cmd" != "init" ]; then
+  echo "Only 'init' subcommand is supported." >&2
+  usage
+  exit 1
+fi
+
+force=false
+gitignore=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f|--force) force=true; shift 1 ;;
+    -g|--gitignore) gitignore=true; shift 1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+src="$SCRIPT_DIR/copilot-instructions.md"
+if [ ! -f "$src" ]; then
+  echo "Source file not found: $src" >&2
+  exit 1
+fi
+
+target_dir="$PWD/.github"
+target="$target_dir/copilot-instructions.md"
+
+if [ -d "$target_dir" ] || mkdir -p "$target_dir"; then
+  :
+else
+  echo "Failed to create directory: $target_dir" >&2
+  exit 1
+fi
+
+if [ -f "$target" ] && [ "$force" = false ]; then
+  echo "Target file already exists: $target" >&2
+  echo "Use --force to overwrite." >&2
+  exit 1
+fi
+
+cp "$src" "$target"
+if [ $? -ne 0 ]; then
+  echo "Failed to copy file." >&2
+  exit 1
+fi
+
+if [ "$force" = true ]; then
+  echo "Replaced $target ✅"
+else
+  echo "Added $target ✅"
+fi
+
+# Handle optional .gitignore update
+if [ "$gitignore" = true ]; then
+  gitignore_file="$PWD/.gitignore"
+  pattern=".github/copilot-instructions.md"
+  if [ -f "$gitignore_file" ]; then
+    # Only add if not already present
+    if grep -Fxq -- "$pattern" "$gitignore_file"; then
+      echo "Note: '$pattern' already present in $gitignore_file"
+    else
+      if printf "%s\n" "$pattern" >> "$gitignore_file"; then
+        echo "Added '$pattern' to $gitignore_file ✅"
+      else
+        echo "Failed to update $gitignore_file" >&2
+      fi
+    fi
+  else
+    echo "No .gitignore found in $PWD. To ignore the file later, add this line to your .gitignore:"
+    echo "$pattern"
+  fi
+fi
+
+exit 0
