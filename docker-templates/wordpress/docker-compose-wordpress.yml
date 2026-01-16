@@ -1,0 +1,124 @@
+version: '3.8'
+
+name: wordpress_stack
+services:
+  wordpress:
+    image: wordpress:latest
+    container_name: wordpress
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      WORDPRESS_DB_HOST: mysql
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_TABLE_PREFIX: wp_
+      # PHP Configuration for production
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_MEMORY_LIMIT', '256M');
+        define('WP_MAX_MEMORY_LIMIT', '512M');
+        define('WP_DEBUG', false);
+        define('WP_DEBUG_LOG', false);
+        define('DISALLOW_FILE_EDIT', false);
+        define('WP_AUTO_UPDATE_CORE', false);
+        define('FS_METHOD', 'direct');
+    volumes:
+      # Persistent WordPress files
+      - wordpress_data:/var/www/html
+      # Custom themes directory (for development/custom themes)
+      - ./wordpress/themes:/var/www/html/wp-content/themes
+      # Custom plugins directory
+      - ./wordpress/plugins:/var/www/html/wp-content/plugins
+      # Uploads directory
+      - ./wordpress/uploads:/var/www/html/wp-content/uploads
+      # Custom PHP configuration
+      - ./wordpress/php-custom.ini:/usr/local/etc/php/conf.d/custom.ini
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - wordpress_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  mysql:
+    image: mysql:8.0
+    container_name: wordpress_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # Custom MySQL configuration
+      - ./mysql/my-custom.cnf:/etc/mysql/conf.d/custom.cnf
+      # Init scripts (optional)
+      - ./mysql/init:/docker-entrypoint-initdb.d
+    networks:
+      - wordpress_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    command: --default-authentication-plugin=mysql_native_password
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: wordpress_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: ${PMA_USER}
+      PMA_PASSWORD: ${PMA_PASSWORD}
+      UPLOAD_LIMIT: 100M
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - wordpress_network
+
+  # Optional: WP-CLI for command line management
+  wpcli:
+    image: wordpress:cli
+    container_name: wordpress_cli
+    user: "33:33"  # www-data user
+    environment:
+      WORDPRESS_DB_HOST: mysql
+      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
+      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
+      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+    volumes:
+      - wordpress_data:/var/www/html
+      - ./wordpress/themes:/var/www/html/wp-content/themes
+      - ./wordpress/plugins:/var/www/html/wp-content/plugins
+      - ./wordpress/uploads:/var/www/html/wp-content/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+      wordpress:
+        condition: service_started
+    networks:
+      - wordpress_network
+    # Keep container running for manual commands
+    entrypoint: ["tail", "-f", "/dev/null"]
+
+networks:
+  wordpress_network:
+    driver: bridge
+
+volumes:
+  wordpress_data:
+    driver: local
+  mysql_data:
+    driver: local

@@ -1,0 +1,48 @@
+# Use version 3 for compatibility
+version: "3.8"
+
+services:
+  postgres:
+    container_name: main_postgres_15
+    image: postgres:16-bookworm
+    restart: never
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - pgnetwork
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: main_pgadmin_4
+    restart: never
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD}
+    ports:
+      - "5050:80"
+    networks:
+      - pgnetwork
+
+  redis:
+    container_name: main_redis_7
+    image: redis:7-alpine
+    restart: never
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - pgnetwork
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  pgnetwork:

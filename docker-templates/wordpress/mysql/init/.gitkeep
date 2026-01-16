@@ -1,0 +1,10 @@
+# MySQL Init Directory
+# Place SQL files here to be executed on first database creation
+# Files are executed in alphabetical order
+
+# Example: Create additional tables or import data
+# CREATE TABLE IF NOT EXISTS custom_logs (
+#     id INT AUTO_INCREMENT PRIMARY KEY,
+#     message TEXT,
+#     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+# );
