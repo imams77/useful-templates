@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Usage: dt init <template> --project-name <name> [--db-name <db>] [--output-dir <dir>] [--force]
+
+Examples:
+  dt init mysql -p test -d db_test
+
+Supported templates: mysql, mongo, postgres, wordpress
+
+Options:
+  -p, --project-name   (required) Name of the destination project directory to create
+  -d, --db-name        (optional) DB name to use when seeding .env from .env.example
+  -o, --output-dir     (optional) Explicit destination directory (overrides project name)
+  -f, --force          (optional) Overwrite destination if it exists
+  -h, --help           Show this help
+EOF
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+cmd="$1"; shift
+if [ "$cmd" != "init" ]; then
+  echo "Only 'init' subcommand is supported." >&2
+  usage
+  exit 1
+fi
+
+if [ $# -lt 1 ]; then
+  echo "Template name required (e.g., mysql)." >&2
+  usage
+  exit 1
+fi
+
+template="$1"; shift
+case "$template" in
+  mysql|mongo|postgres|wordpress) ;; 
+  *) echo "Unknown template: $template" >&2; exit 1 ;;
+esac
+
+# parse options
+project_name=""
+db_name=""
+output_dir=""
+force=false
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p|--project-name) project_name="$2"; shift 2 ;;
+    -d|--db-name) db_name="$2"; shift 2 ;;
+    -o|--output-dir) output_dir="$2"; shift 2 ;;
+    -f|--force) force=true; shift 1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+if [ -z "$project_name" ] && [ -z "$output_dir" ]; then
+  echo "Error: --project-name or --output-dir is required." >&2
+  usage
+  exit 1
+fi
+
+# determine destination
+if [ -n "$output_dir" ]; then
+  dest_dir="$output_dir"
+else
+  dest_dir="$PWD/$project_name"
+fi
+
+if [ -d "$dest_dir" ] && [ "$force" = false ]; then
+  echo "Destination '$dest_dir' already exists. Use --force to overwrite." >&2
+  exit 1
+fi
+
+# copy template
+template_dir="$SCRIPT_DIR/$template"
+if [ ! -d "$template_dir" ]; then
+  echo "Template directory not found: $template_dir" >&2
+  exit 1
+fi
+
+rm -rf "$dest_dir"
+mkdir -p "$dest_dir"
+cp -a "$template_dir/." "$dest_dir/"
+
+# Post-processing: for mysql, update .env if provided
+if [ "$template" = "mysql" ]; then
+  if [ -f "$dest_dir/.env.example" ]; then
+    cp "$dest_dir/.env.example" "$dest_dir/.env"
+    if [ -n "$db_name" ]; then
+      # Replace MYSQL_DATABASE= value
+      if grep -q "^MYSQL_DATABASE=" "$dest_dir/.env"; then
+        sed -i.bak -E "s/^MYSQL_DATABASE=.*/MYSQL_DATABASE=${db_name}/" "$dest_dir/.env" && rm -f "$dest_dir/.env.bak"
+      else
+        echo "MYSQL_DATABASE=${db_name}" >> "$dest_dir/.env"
+      fi
+    fi
+  fi
+fi
+
+cat <<EOF
+Template '$template' initialized at: $dest_dir ✅
+
+Next steps:
+  - cd "$dest_dir"
+  - Inspect and update the '.env' file (do NOT commit secrets)
+  - Run: docker compose -f ${template_dir##*/}-*.yml up -d  # or use your project's compose command
+
+If you need to overwrite an existing folder, re-run with --force.
+EOF
