@@ -1,0 +1,11 @@
+# Override: PHP 8.2 (example)
+# Recommendation: replace with a full, pinned tag (e.g. php:8.2.<patch>-fpm-alpine) for reproducibility.
+
+services:
+  php:
+    image: "${PHP_IMAGE:-php:8.2-fpm-alpine}"
+    container_name: "php-8.2"
+    environment:
+      - PHP_VERSION=8.2
+    env_file:
+      - ./env/php-8.2.env

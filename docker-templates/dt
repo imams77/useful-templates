@@ -4,20 +4,28 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
-  cat <<EOF
-Usage: dt init <template> --project-name <name> [--db-name <db>] [--output-dir <dir>] [--force]
+  cat <<'EOF'
+Usage: dt init <template> --project-name <name> [--db-name <db>] [--output-dir <dir>] [--compose-name <file>] [--force]
 
 Examples:
   dt init mysql -p test -d db_test
+  dt init postgres -p myproj                # creates ./myproj with docker-compose.yml
+  dt init postgres -p myproj -n pg.yml      # keep original name or choose a custom compose filename
 
 Supported templates: mysql, mongo, postgres, wordpress
 
 Options:
-  -p, --project-name   (required) Name of the destination project directory to create
-  -d, --db-name        (optional) DB name to use when seeding .env from .env.example
-  -o, --output-dir     (optional) Explicit destination directory (overrides project name)
-  -f, --force          (optional) Overwrite destination if it exists
-  -h, --help           Show this help
+  -p, --project-name     (required) Name of the destination project directory to create
+  -d, --db-name          (optional) DB name to use when seeding .env from .env.example
+  -o, --output-dir       (optional) Explicit destination path (overrides project name)
+  -n, --compose-name     (optional) Name for the composed docker-compose file in the destination (default: docker-compose.yml)
+  -f, --force            (optional) Overwrite destination if it exists
+  -h, --help             Show this help
+
+Behavior notes:
+  - By default the script will rename the template's `docker-compose-*.yml` to `docker-compose.yml` in the destination.
+    If a `docker-compose.yml` already exists in the destination and you did not pass `--force`, the command will abort to avoid clobbering existing compose files.
+  - The script will also update `container_name:` entries in the copied compose file so they are prefixed with the project name (e.g. `myproj_postgres`).
 EOF
 }
 
@@ -49,6 +57,7 @@ esac
 project_name=""
 db_name=""
 output_dir=""
+compose_name=""
 force=false
 
 while [ $# -gt 0 ]; do
@@ -56,6 +65,7 @@ while [ $# -gt 0 ]; do
     -p|--project-name) project_name="$2"; shift 2 ;;
     -d|--db-name) db_name="$2"; shift 2 ;;
     -o|--output-dir) output_dir="$2"; shift 2 ;;
+    -n|--compose-name) compose_name="$2"; shift 2 ;;
     -f|--force) force=true; shift 1 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
@@ -91,6 +101,88 @@ rm -rf "$dest_dir"
 mkdir -p "$dest_dir"
 cp -a "$template_dir/." "$dest_dir/"
 
+# Determine effective project name (used to prefix container_name)
+effective_project_name="$project_name"
+if [ -z "$effective_project_name" ]; then
+  effective_project_name="$(basename "$dest_dir")"
+fi
+
+# Locate docker-compose source file(s) in the copied template
+mapfile -t compose_files < <(find "$dest_dir" -maxdepth 1 -type f \( -name 'docker-compose-*.yml' -o -name 'docker-compose-*.yaml' \) | sort)
+count=${#compose_files[@]}
+selected_src=""
+
+if [ ${count} -eq 0 ]; then
+  # no compose file to rename/modify
+  selected_src=""
+elif [ -n "$compose_name" ]; then
+  # user provided a target/name; try to select a sensible source
+  # if the user passed the exact source filename, use it; otherwise pick the first available
+  for f in "${compose_files[@]:-}"; do
+    if [ "$(basename "$f")" = "$compose_name" ]; then
+      selected_src="$f"; break
+    fi
+  done
+  if [ -z "$selected_src" ] && [ ${count} -gt 0 ]; then
+    selected_src="${compose_files[0]}"
+  fi
+else
+  if [ ${count} -eq 1 ]; then
+    selected_src="${compose_files[0]}"
+  else
+    # prefer a file that contains the template name, otherwise require explicit -n
+    for f in "${compose_files[@]:-}"; do
+      if echo "$(basename "$f")" | grep -qi "${template}"; then
+        selected_src="$f"; break
+      fi
+    done
+    if [ -z "$selected_src" ]; then
+      echo "Multiple compose files found in template; please specify which to use with -n/--compose-name." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# If we found a compose source, compute the target and safely rename + patch container_name
+chosen_compose_target=""
+if [ -n "$selected_src" ]; then
+  # determine final target filename
+  if [ -n "$compose_name" ]; then
+    chosen_compose_target="$dest_dir/$compose_name"
+  else
+    chosen_compose_target="$dest_dir/docker-compose.yml"
+  fi
+
+  if [ -e "$chosen_compose_target" ] && [ "$chosen_compose_target" != "$selected_src" ] && [ "$force" = false ]; then
+    echo "Compose target '$chosen_compose_target' already exists in destination. Aborting to avoid overwrite (use --force to override)." >&2
+    exit 1
+  fi
+
+  # rewrite container_name lines to prefix with project name (preserve suffix after first underscore when present)
+  tmpf="$(mktemp)"
+  awk -v p="$effective_project_name" '{
+    if (match($0, /^[[:space:]]*container_name:[[:space:]]*([A-Za-z0-9._-]+)/, m)) {
+      orig=m[1]; pref=p "_";
+      if (index(orig, pref) != 1) {
+        n = split(orig, a, "_");
+        if (n > 1) {
+          s = a[2];
+          for(i=3;i<=n;i++) s = s "_" a[i];
+        } else { s = orig }
+        new = p "_" s;
+        sub(orig, new);
+      }
+    }
+    print
+  }' "$selected_src" > "$tmpf"
+
+  mv -f "$tmpf" "$chosen_compose_target"
+  # if we renamed (target != source) remove the original compose file
+  if [ "$chosen_compose_target" != "$selected_src" ]; then
+    rm -f "$selected_src"
+  fi
+fi
+
 # Post-processing: for mysql, update .env if provided
 if [ "$template" = "mysql" ]; then
   if [ -f "$dest_dir/.env.example" ]; then
@@ -106,13 +198,20 @@ if [ "$template" = "mysql" ]; then
   fi
 fi
 
+# Show user where we put the compose file (if any)
+if [ -n "$selected_src" ]; then
+  compose_shown="-f $(basename "$chosen_compose_target")"
+else
+  compose_shown=""
+fi
+
 cat <<EOF
 Template '$template' initialized at: $dest_dir ✅
 
 Next steps:
   - cd "$dest_dir"
   - Inspect and update the '.env' file (do NOT commit secrets)
-  - Run: docker compose -f ${template_dir##*/}-*.yml up -d  # or use your project's compose command
+  - Run: docker compose ${compose_shown} up -d  # or use your project's compose command
 
 If you need to overwrite an existing folder, re-run with --force.
 EOF

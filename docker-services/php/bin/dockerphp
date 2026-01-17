@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Simple helper to add per-version compose/env templates:
+# Usage: dockerphp add 8.2
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEMPLATE_COMPOSE="$ROOT_DIR/docker-compose.phpTEMPLATE.yml"
+ENV_DIR="$ROOT_DIR/env"
+
+usage(){
+  cat <<-EOF
+Usage: $(basename "$0") <command>
+
+Commands:
+  add <version>    Create per-version override + env template (e.g. 8.2 or 8.4)
+  list             List available per-version overrides
+  help             Show this help
+
+Examples:
+  $(basename "$0") add 8.2
+  docker compose -f docker-compose.yml -f docker-compose.php8.2.yml up -d
+EOF
+}
+
+if [ ${#@} -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+cmd=$1
+shift || true
+
+case "$cmd" in
+  add)
+    if [ ${#@} -lt 1 ]; then
+      echo "error: missing version (example: 8.2)" >&2
+      exit 2
+    fi
+    ver=$1
+    # simple validation: allow digits and dots
+    if ! [[ $ver =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+      echo "error: version must be numeric, e.g. 8.2 or 8.4.1" >&2
+      exit 2
+    fi
+
+    compose_file="$ROOT_DIR/docker-compose.php${ver}.yml"
+    env_file="$ENV_DIR/php-${ver}.env"
+
+    if [ -e "$compose_file" ] || [ -e "$env_file" ]; then
+      echo "skipping: one or both files already exist: $compose_file, $env_file"
+      exit 0
+    fi
+
+    mkdir -p "$ENV_DIR"
+
+    cat > "$compose_file" <<-YML
+# Generated override for PHP ${ver}
+# Replace default tag with a fully-pinned image for reproducibility.
+services:
+  php:
+    image: "${PHP_IMAGE:-php:${ver}-fpm-alpine}"
+    container_name: "php-${ver}"
+    env_file:
+      - ./env/php-${ver}.env
+YML
+
+    cat > "$env_file" <<-ENV
+# Environment template for PHP ${ver}
+# Pin a full image tag here for reproducible builds (recommended):
+# PHP_IMAGE=php:8.2.17-fpm-alpine
+PHP_IMAGE=php:${ver}-fpm-alpine
+HOST_UID=${HOST_UID:-1000}
+HOST_GID=${HOST_GID:-1000}
+PHP_FPM_PORT=9000
+ENV
+
+    echo "created: $compose_file"
+    echo "created: $env_file"
+    echo
+    echo "Next steps:"
+    echo "  1) review + pin the full image tag in $env_file" 
+    echo "  2) start: docker compose -f docker-compose.yml -f $compose_file up -d"
+    ;;
+
+  list)
+    ls -1 docker-compose.php*.yml 2>/dev/null || echo "(no per-version overrides found)"
+    ;;
+
+  help|--help|-h)
+    usage
+    ;;
+
+  *)
+    echo "unknown command: $cmd" >&2
+    usage
+    exit 3
+    ;;
+
+esac
