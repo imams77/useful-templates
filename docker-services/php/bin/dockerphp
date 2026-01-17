@@ -13,13 +13,20 @@ usage(){
 Usage: $(basename "$0") <command>
 
 Commands:
-  add <version>    Create per-version override + env template (e.g. 8.2 or 8.4)
-  list             List available per-version overrides
-  help             Show this help
+  add <version>        Create per-version override + env template (e.g. 8.2 or 8.4)
+  start <version>      Start the composed PHP service (uses per-version override)
+  list                 List available per-version overrides
+  help                 Show this help
 
 Examples:
   $(basename "$0") add 8.2
+  $(basename "$0") start 8.4       # runs: docker compose -f docker-compose.yml -f docker-compose.php8.4.yml up -d
   docker compose -f docker-compose.yml -f docker-compose.php8.2.yml up -d
+
+Notes:
+  - To pass extra docker compose args, append them after --, e.g.:
+      $(basename "$0") start 8.4 -- --build
+  - To run multiple versions concurrently, supply different COMPOSE_PROJECT_NAME env values.
 EOF
 }
 
@@ -81,6 +88,119 @@ ENV
     echo "Next steps:"
     echo "  1) review + pin the full image tag in $env_file" 
     echo "  2) start: docker compose -f docker-compose.yml -f $compose_file up -d"
+    ;;
+
+  start)
+    if [ ${#@} -lt 1 ]; then
+      echo "error: missing version (example: 8.2)" >&2
+      exit 2
+    fi
+    ver=$1
+    shift || true
+
+    compose_file="$ROOT_DIR/docker-compose.php${ver}.yml"
+    if [ ! -f "$compose_file" ]; then
+      echo "error: per-version compose not found: $compose_file" >&2
+      echo "hint: run 'dockerphp add ${ver}' to create a template, or create/point to a compose override" >&2
+      exit 4
+    fi
+
+    # Defensive: clear compose-related env vars so external state can't change behavior.
+    unset COMPOSE_FILE COMPOSE_PROJECT_DIRECTORY COMPOSE_PROJECT_NAME DOCKER_CONTEXT || true
+
+    # collect extra args after -- (optional)
+    extra_args=()
+    dry_run=false
+    # allow `--dry-run` before the `--` or inside extra args
+    if [ "${1:-}" = "--dry-run" ]; then
+      dry_run=true
+      shift || true
+    fi
+    if [ "${1:-}" = "--" ]; then
+      shift
+      # capture extra args and detect --dry-run there too
+      for a in "$@"; do
+        if [ "$a" = "--dry-run" ]; then
+          dry_run=true
+        else
+          # reject user-supplied compose control flags for safety
+          case "$a" in
+            -f|--file|--project-directory|--project-name|-p)
+              echo "error: passing compose -f/--file or --project-directory is not allowed; dockerphp operates only on its own service directory." >&2
+              exit 8
+              ;;
+            *) extra_args+=("$a") ;;
+          esac
+        fi
+      done
+    fi
+
+    # warn if user is inside another compose project — we'll ignore it intentionally
+    if [ -f "$PWD/docker-compose.yml" ] || [ -f "$PWD/docker-compose.yaml" ] || [ -f "$PWD/compose.yaml" ]; then
+      echo "warning: detected compose files in current directory ($PWD). dockerphp will ignore those and run the service defined under: $ROOT_DIR" >&2
+    fi
+
+    echo "Preparing to start PHP ${ver} (override: $(basename "$compose_file")) — project-directory: $ROOT_DIR"
+
+    base_compose="$ROOT_DIR/docker-compose.yml"
+    override_compose="$compose_file"
+
+    if [ ! -f "$base_compose" ]; then
+      echo "error: base compose not found: $base_compose" >&2
+      exit 5
+    fi
+
+    # Show the composed services (helpful if user sees "no such service")
+    cfg_services_output="$(docker compose --project-directory "$ROOT_DIR" -f "$base_compose" -f "$override_compose" config --services 2>&1)" || true
+
+    # If config failed, surface the underlying errors and stop.
+    if ! docker compose --project-directory "$ROOT_DIR" -f "$base_compose" -f "$override_compose" config >/dev/null 2>&1; then
+      echo "error: docker compose configuration is invalid for these files:" >&2
+      echo "  $base_compose" >&2
+      echo "  $override_compose" >&2
+      echo >&2
+      echo "Underlying compose output:" >&2
+      echo "$cfg_services_output" >&2
+      echo >&2
+      echo "Run the following to inspect the compose errors:" >&2
+      echo "  docker compose --project-directory '$ROOT_DIR' -f '$base_compose' -f '$override_compose' config" >&2
+      exit 6
+    fi
+
+    # If the composed services don't include the `php` service, show helpful diagnostics and exit.
+    if ! echo "$cfg_services_output" | grep -xq "php"; then
+      echo "error: composed configuration does not define the 'php' service." >&2
+      echo "Services found:" >&2
+      echo "$cfg_services_output" >&2
+      echo "Hint: ensure the override file defines 'services: php:' (service name must match base) and that the override file exists in $ROOT_DIR." >&2
+      echo "You can inspect the merged compose with:" >&2
+      echo "  docker compose --project-directory '$ROOT_DIR' -f '$base_compose' -f '$override_compose' config" >&2
+      exit 7
+    fi
+
+    # Dry-run: show exact command and resolved services, then exit
+    docker_cmd=(docker compose --project-directory "$ROOT_DIR" -f "$base_compose" -f "$override_compose" up -d)
+    if [ "$dry_run" = true ]; then
+      printf "DRY RUN: would run:\n  %s\n\n" "${docker_cmd[*]} ${extra_args[*]}"
+      printf "Resolved services:\n%s\n" "$cfg_services_output"
+      exit 0
+    fi
+
+    # Finally, run with a clean environment and the enforced project directory
+    # Note: only append extra_args if non-empty to avoid passing an empty string as a service name
+    if [ -n "${COMPOSE_PROJECT_NAME:-}" ]; then
+      if [ ${#extra_args[@]} -gt 0 ]; then
+        COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" docker compose --project-directory "$ROOT_DIR" -p "$COMPOSE_PROJECT_NAME" -f "$base_compose" -f "$override_compose" up -d "${extra_args[@]}"
+      else
+        COMPOSE_PROJECT_NAME="$COMPOSE_PROJECT_NAME" docker compose --project-directory "$ROOT_DIR" -p "$COMPOSE_PROJECT_NAME" -f "$base_compose" -f "$override_compose" up -d
+      fi
+    else
+      if [ ${#extra_args[@]} -gt 0 ]; then
+        docker compose --project-directory "$ROOT_DIR" -f "$base_compose" -f "$override_compose" up -d "${extra_args[@]}"
+      else
+        docker compose --project-directory "$ROOT_DIR" -f "$base_compose" -f "$override_compose" up -d
+      fi
+    fi
     ;;
 
   list)

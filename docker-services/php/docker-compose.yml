@@ -1,7 +1,6 @@
 # Common, version-agnostic service definition (hybrid strategy)
 # Use per-version override files to pin exact images/tags for reproducibility.
 
-version: "3.9"
 services:
   php:
     # Default (can be overridden by env/PHP_IMAGE or per-version compose)
