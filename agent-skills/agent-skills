@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Usage: agent-skills init <skill> [--force|-f] [--help]
+
+Commands:
+  init <skill>   Copy skill folder into current directory
+
+Available Skills:
+  react          Unit testing for React components and hooks
+  typescript     Unit testing for TypeScript files
+
+Options:
+  -f, --force    Overwrite existing files
+  -h, --help     Show this help
+
+Examples:
+  agent-skills init react
+  agent-skills init typescript
+  agent-skills init react --force
+  ./agent-skills/agent-skills init typescript
+EOF
+}
+
+if [ $# -lt 1 ]; then
+  usage
+  exit 1
+fi
+
+cmd="$1"; shift
+if [ "$cmd" != "init" ]; then
+  echo "Only 'init' subcommand is supported." >&2
+  usage
+  exit 1
+fi
+
+if [ $# -lt 1 ]; then
+  echo "Error: Missing skill name." >&2
+  usage
+  exit 1
+fi
+
+skill="$1"; shift
+
+force=false
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f|--force) force=true; shift 1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
+  esac
+done
+
+# Map skill names to source directories
+case "$skill" in
+  react)
+    src_dir="$SCRIPT_DIR/unit-testing-react"
+    target_dir="$PWD/unit-testing-react"
+    ;;
+  typescript)
+    src_dir="$SCRIPT_DIR/unit-testing-typescript"
+    target_dir="$PWD/unit-testing-typescript"
+    ;;
+  *)
+    echo "Unknown skill: $skill" >&2
+    echo "Available skills: react, typescript" >&2
+    exit 1
+    ;;
+esac
+
+if [ ! -d "$src_dir" ]; then
+  echo "Source directory not found: $src_dir" >&2
+  exit 1
+fi
+
+# Check if target already exists
+if [ -d "$target_dir" ] && [ "$force" = false ]; then
+  echo "Target directory already exists: $target_dir" >&2
+  echo "Use --force to overwrite." >&2
+  exit 1
+fi
+
+# Remove target if force mode
+if [ -d "$target_dir" ] && [ "$force" = true ]; then
+  rm -rf "$target_dir"
+  echo "Removed existing directory: $target_dir"
+fi
+
+# Copy the directory
+cp -r "$src_dir" "$target_dir"
+if [ $? -ne 0 ]; then
+  echo "Failed to copy directory." >&2
+  exit 1
+fi
+
+# Count files copied
+file_count=$(find "$target_dir" -type f | wc -l)
+
+if [ "$force" = true ]; then
+  echo "Replaced $target_dir with $file_count files ✅"
+else
+  echo "Added $target_dir with $file_count files ✅"
+fi
+
+# List the copied files
+echo ""
+echo "Files copied:"
+find "$target_dir" -type f -name "*.md" | sort | while read -r file; do
+  rel_path="${file#$PWD/}"
+  echo "  - $rel_path"
+done
+
+exit 0
