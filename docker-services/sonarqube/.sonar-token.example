@@ -1,0 +1,20 @@
+# SonarQube Authentication Token
+#
+# This file stores your SonarQube authentication token for scanning.
+# The scan.sh script will automatically read from this file if present.
+#
+# SETUP:
+#   1. Copy this file: cp .sonar-token.example .sonar-token
+#   2. Replace the placeholder below with your actual token
+#   3. Ensure .sonar-token is in your .gitignore (NEVER commit tokens!)
+#
+# GENERATE A TOKEN:
+#   1. Open SonarQube: http://localhost:9001
+#   2. Go to: My Account > Security > Generate Tokens
+#   3. Enter a name (e.g., "scanner") and click Generate
+#   4. Copy the token (starts with squ_)
+#
+# IMPORTANT: This file should NEVER be committed to version control!
+#            Add .sonar-token to your .gitignore file.
+
+squ_your_token_here
