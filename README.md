@@ -1,3 +1,10 @@
+## Introduction
+
+This repo contains useful commands / templates for:
+1. Docker templates for initializing wordpress, mysql, or postgres environment
+2. Agent instructions, mainly for github copilot
+3. Agent skills instructions for react & typescript 
+
 ## Installation
 
 ### Clone the repo
@@ -8,7 +15,7 @@ git clone git@github.com:imams77/useful-templates.git ~/.useful-templates
 ### Copy to ./zshrc or ./bashrc
 
 make sure the `TEMPLATES_DIR` variable matched the repository directory
-```
+```bash
 # template
 export TEMPLATES_DIR="$HOME/.useful-templates"
 
@@ -28,13 +35,21 @@ fi
 ## Usage
 
 ### Copilot Agent
-Generates copilot instruction file in `[directory]/.github/copilot-instructions.md`
-```
+Generates copilot instruction file in `[directory]/.github/copilot-instructions.md`. Technically you can use this outside github copilot, just rename the file into `AGENTS.md`
+```bash
 agent init
+```
+
+### Copilot Agent Skills
+Generate copilot skills for react & typescript
+```bash
+agent-skills init
 ```
 
 ### docker template (dt)
 Generate docker-compose file for wordpress, mysql, and postgres projects. You need to install docker on your machine
-
+```bash
+dt init [name] #wordpress / mysql / postgres
+```
 ##### Available options
 <img width="2529" height="805" alt="image" src="https://github.com/user-attachments/assets/da4a98f0-fbb8-415b-8d2b-cb424ad3da2c" />
