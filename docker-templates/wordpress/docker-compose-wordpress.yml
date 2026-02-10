@@ -10,9 +10,9 @@ services:
       - "${WORDPRESS_PORT:-8080}:80"
     environment:
       WORDPRESS_DB_HOST: mysql
-      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
-      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
-      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
       WORDPRESS_TABLE_PREFIX: wp_
       # PHP Configuration for production
       WORDPRESS_CONFIG_EXTRA: |
@@ -23,6 +23,8 @@ services:
         define('DISALLOW_FILE_EDIT', false);
         define('WP_AUTO_UPDATE_CORE', false);
         define('FS_METHOD', 'direct');
+        define('WP_HOME', '${WORDPRESS_URL}:${WORDPRESS_PORT}');
+        define('WP_SITEURL', '${WORDPRESS_URL}:${WORDPRESS_PORT}');
     volumes:
       # Persistent WordPress files
       - wordpress_data:/var/www/html
@@ -108,9 +110,9 @@ services:
     user: "33:33" # www-data user
     environment:
       WORDPRESS_DB_HOST: mysql
-      WORDPRESS_DB_USER: ${WORDPRESS_DB_USER}
-      WORDPRESS_DB_PASSWORD: ${WORDPRESS_DB_PASSWORD}
-      WORDPRESS_DB_NAME: ${WORDPRESS_DB_NAME}
+      WORDPRESS_DB_USER: ${MYSQL_USER}
+      WORDPRESS_DB_PASSWORD: ${MYSQL_PASSWORD}
+      WORDPRESS_DB_NAME: ${MYSQL_DATABASE}
     volumes:
       - wordpress_data:/var/www/html
       - ./wordpress/themes:/var/www/html/wp-content/themes
