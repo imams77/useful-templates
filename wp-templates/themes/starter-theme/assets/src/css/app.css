@@ -1,0 +1,9 @@
+@import "tailwindcss";
+
+/* Scan all PHP files in the theme root for Tailwind class usage. */
+@source "../../**/*.php";
+
+@theme {
+  /* Customize your Tailwind theme here. */
+  /* https://tailwindcss.com/docs/theme */
+}
